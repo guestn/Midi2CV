@@ -4,6 +4,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Encoder.h>
 
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
@@ -11,7 +12,6 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define SSD1306_I2C_ADDRESS   0x3C
 #define LOGO16_GLCD_HEIGHT 16 
 #define LOGO16_GLCD_WIDTH  16 
-
 
 int cs_pin = 0;
 int gate_pin = 14;
@@ -23,17 +23,66 @@ float maximum_voltage = 8.32; // voltage output after op amps
 float maximum_pitch_value = maximum_voltage * 12.0; 
 float number_of_steps = 4096; // DAC resolution
 
+int buttonPin = 4;
+volatile int buttonState = 0;
+
+long encoderPosn = 0;
+long encoderCounter = 0;
+Encoder encoder(2, 3);
+
+int activeTab = 0;
+
 void setup() {
   SPI.begin();
   setupMidi();
+  setupControls();
   setupDisplay();
+  Serial.begin(9600);
 }
 
 void loop() {
-    if (usbMIDI.read()) {
+  if (usbMIDI.read()) {
     processMIDI();
   }
+  readEncoder();
 }
+
+// ------------------//
+// Control functions //
+// ------------------//
+volatile int dir = 0;
+void setupControls() {
+  pinMode(buttonPin, INPUT_PULLUP);
+}
+
+void readEncoder() {
+  long newEncoderPosn;
+  newEncoderPosn = encoder.read();
+  if (newEncoderPosn != encoderPosn) {
+    if (newEncoderPosn % 4 == 0) {
+      encoderCounter = newEncoderPosn/4;
+      Serial.println(encoderCounter);
+      activeTab = encoderCounter;
+      renderTabs(activeTab);
+    }
+    encoderPosn = newEncoderPosn;
+  }
+
+}
+
+void onButtonClick() {
+  //cli();
+  buttonState = digitalRead(buttonPin);
+  Serial.print("Click");
+  //Serial.println(buttonState);
+  //sei();
+
+}
+
+
+// ---------------//
+// MIDI functions //
+// ---------------//
 
 void setupMidi() {
   pinMode(cs_pin, OUTPUT);
@@ -58,7 +107,7 @@ void OnNoteOn (byte channel, byte pitch, byte velocity) {
       writeDAC(cs_pin, 1, velocity << 5);
       digitalWriteFast(gate_pin, HIGH);
       String note = numberToString(pitch);
-      printToLCD(("NoteOn: " + note), 0, 32, 1);
+      printToLCD(("NoteOn: " + note), 0, 32, 1, WHITE);
     }
 
     else {
@@ -83,7 +132,7 @@ void OnPitchChange (byte channel, int pitch_change) {
 
 void writeDAC (int cs, int dac, int val) {
   digitalWrite(cs, LOW);
-   //val = val * 4.0;
+  val = val* 1.1;
   dac = dac & 1;
   val = val & 4095;
   //val = val & 8191;
@@ -121,7 +170,7 @@ void processMIDI(void) {
       break;
 
     case usbMIDI.NoteOn: // 0x90
-      printToLCD(data2, 60, 20, 1);
+      printToLCD(data2, 60, 20, 1, WHITE);
       //int bytes = 112131;
       Serial.print("Note On, ch=");
       Serial.print(channel, DEC);
@@ -134,8 +183,6 @@ void processMIDI(void) {
 
 }
 
-
-
 // --------------//
 // LCD functions //
 // --------------//
@@ -147,21 +194,30 @@ void setupDisplay()   {
   display.clearDisplay();
    // display.fillCircle(display.width()/2, display.height()/2, 10, WHITE);
   display.drawLine(0, 11, display.width()-1, 11, WHITE);
-  printToLCD("MIDI to CV v1.0", 0, 0, 1);
-  printToLCD("Velocity: ", 0, 20, 1);
+  printToLCD("MIDI to CV v1.0", 0, 0, 1, WHITE);
+  printToLCD("Velocity: ", 0, 20, 1, WHITE);
   //display.invertDisplay(true);
 
   //display.fillRect(curX, curY, 100, 10, BLACK);
 
 
-  display.drawRect(0, 53, 41, 11, WHITE);
-  printToLCD("MAIN", 3, 55, 1);
-  display.drawRect(43, 53, 41, 11, WHITE);
-  printToLCD("2", 47, 55, 1);
-  display.drawRect(86, 53, 41, 11, WHITE);
-  printToLCD("3", 90, 55, 1);
+  renderTabs(activeTab);
   
   display.display();
+}
+
+void renderTabs(int activeTab) {
+  String tabs[3] = { "MAIN", "2", "3" };
+  for (int i = 0; i < 3; i++) {
+    display.fillRect(1 + i * 42, 52, 41, 11, BLACK);
+    if (i == activeTab) {
+      display.fillRect(i * 43, 53, 41, 11, WHITE);
+      printToLCD(tabs[i], 3 + i * 43, 55, 1, BLACK);
+    } else {
+      display.drawRect(i * 43, 53, 41, 11, WHITE);
+      printToLCD(tabs[i], 3 + i * 43, 55, 1, WHITE);
+    }
+  }
 }
 
 String numberToString (byte pitch) {
@@ -172,11 +228,15 @@ String numberToString (byte pitch) {
   return noteWithOctave;
 }
 
-void printToLCD (String value, int curX, int curY, int size) {
-  //display.fillRect(curX, curY, 100, 10, BLACK);
-
+void printToLCD (String value, int curX, int curY, int size, char color) {
+  char bgColor = BLACK;
+  if (color == BLACK) {
+    bgColor = WHITE;
+  }
+  int strLength = value.length();
+  display.fillRect(curX, curY, strLength * 6, 8, bgColor);
   display.setTextSize(size);
-  display.setTextColor(WHITE);
+  display.setTextColor(color);
   display.setCursor(curX, curY);
   display.println(value);
   display.display();
