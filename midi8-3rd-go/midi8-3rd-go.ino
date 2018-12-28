@@ -1,7 +1,5 @@
 #include <Wire.h>
-#include <LCD.h>
 #include <SPI.h>
-#include <LiquidCrystal_I2C.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Encoder.h>
@@ -29,12 +27,12 @@ int buttonPin = 4;
 Bounce pushbutton = Bounce(buttonPin, 10); 
 
 long encoderPosn = 0;
-//long encoderCounter = 0;
 Encoder encoder(2, 3);
 
 int activeTab = 0;
 int screenMode = 1; // 1 is tabs, -1 is screen;
 int tuning = EEPROM.read(0);
+int octave = EEPROM.read(100);
 
 
 // ---------------//
@@ -81,6 +79,12 @@ void onEncoderChange() {
       renderTuning(tuning, BLACK);
       EEPROM.write(0, tuning);
     }
+    if (activeTab == 2 && screenMode == -1) {
+      octave += newEncoderPosn/4;
+      octave = constrain(octave, -2, 2);
+      renderOctave(octave, BLACK);
+      EEPROM.write(100, octave);
+    }
     encoder.write(0);
   }
 }
@@ -96,6 +100,13 @@ void onButtonClick() {
         renderTuning(tuning, BLACK);
       } else {
         renderTuning(tuning, WHITE);
+      }
+    }
+    if (activeTab == 2) {
+      if (screenMode == -1) {
+        renderOctave(octave, BLACK);
+      } else {
+        renderOctave(octave, WHITE);
       }
     }
   }
@@ -176,46 +187,12 @@ void writeDAC (int cs, int dac, int val) {
   digitalWrite(cs, HIGH);
 }
 
-//void processMIDI(void) {
-//  byte type, channel, data1, data2;
-//
-//  // fetch the MIDI message, defined by these 5 numbers (except SysEX)
-//  //
-//  type = usbMIDI.getType();       // which MIDI message, 128-255
-//  channel = usbMIDI.getChannel(); // which MIDI channel, 1-16
-//  data1 = usbMIDI.getData1();     // first data byte of message, 0-127
-//  data2 = usbMIDI.getData2();     // second data byte of message, 0-127
-//  
-//  switch (type) {
-//    case usbMIDI.NoteOff: // 0x80
-//      Serial.print("Note Off, ch=");
-//      Serial.print(channel, DEC);
-//      Serial.print(", note=");
-//      Serial.print(data1, DEC);
-//      Serial.print(", velocity=");
-//      Serial.println(data2, DEC);
-//      break;
-//
-//    case usbMIDI.NoteOn: // 0x90
-//      
-//      //int bytes = 112131;
-//      Serial.print("Note On, ch=");
-//      Serial.print(channel, DEC);
-//      Serial.print(", note=");
-//      Serial.print(data1, DEC);
-//      Serial.print(", velocity=");
-//      Serial.println(data2, DEC);
-//      break;
-//  }
-//
-//}
-
 // --------------//
 // LCD functions //
 // --------------//
 
 void setupDisplay()   {                
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x64) - needs change in adafruit lib actually
   display.clearDisplay();
   renderTabs(activeTab);
   display.display();
@@ -223,7 +200,7 @@ void setupDisplay()   {
 
 void renderTabs(int encoderVal) {
 
-  String tabs[3] = { "MAIN", "TUNE", "2" };
+  String tabs[3] = { "MAIN", "TUNE", "8ve" };
   for (int i = 0; i < 3; i++) {
     display.fillRect(1 + i * 42, 52, 41, 11, BLACK);
     if (i == activeTab) {
@@ -242,25 +219,20 @@ void renderScreen(int screen) {
   display.fillRect(0, 0, 128, 52, BLACK); // clear screen area
 
   switch(screen) {
-
     case 0  :
       display.drawLine(0, 11, display.width()-1, 11, WHITE);
       printToLCD("MIDI to CV v1.0", 0, 0, 1, WHITE);
-      //printToLCD("Velo: ", 0, 20, 1, WHITE);;
       break;
   
     case 1  :
-      //display.
       printToLCD("Tuning", 40, 0, 1, WHITE);
       renderTuning(tuning, WHITE);
-     
-
       break;
 
     case 2  :
-      printToLCD(screen, 0, 0, 2, WHITE);;
+      printToLCD("Octave +/-", 32, 0, 1, WHITE);
+      renderOctave(octave, WHITE);
       break;
-
   }
 
 }
@@ -269,8 +241,8 @@ void renderTuning(int value, char color) {
   int pixelScale = 5;
   display.fillRect(40, 30, 60, 20, BLACK);
   display.fillRect(0, 12, 128, 12, BLACK);
-  if (tuning > 0)
-    display.fillRect(64, 12, tuning * pixelScale, 12, WHITE);
+  if (tuning >= 0)
+    display.fillRect(64, 12, (tuning * pixelScale) + 1, 12, WHITE);
   else {
     display.fillRect(64 + (tuning * pixelScale), 12, -(tuning * pixelScale), 12, WHITE);
   }
@@ -278,6 +250,11 @@ void renderTuning(int value, char color) {
   printToLCD(value, 40, 30, 2, color);
 
   display.display();
+}
+
+void renderOctave(int value, char color) {
+   display.fillRect(45, 16, 60, 36, BLACK);
+   printToLCD(value, 45, 16, 4, color);
 }
 
 String numberToString (byte pitch) {
