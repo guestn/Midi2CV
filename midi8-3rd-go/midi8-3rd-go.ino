@@ -5,11 +5,13 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Encoder.h>
+#include <Bounce.h>
+#include <EEPROM.h>
 
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
 #define SSD1306_128_64
-#define SSD1306_I2C_ADDRESS   0x3C
+#define SSD1306_I2C_ADDRESS 0x3C
 #define LOGO16_GLCD_HEIGHT 16 
 #define LOGO16_GLCD_WIDTH  16 
 
@@ -24,59 +26,79 @@ float maximum_pitch_value = maximum_voltage * 12.0;
 float number_of_steps = 4096; // DAC resolution
 
 int buttonPin = 4;
-volatile int buttonState = 0;
+Bounce pushbutton = Bounce(buttonPin, 10); 
 
 long encoderPosn = 0;
-long encoderCounter = 0;
+//long encoderCounter = 0;
 Encoder encoder(2, 3);
 
 int activeTab = 0;
+int screenMode = 1; // 1 is tabs, -1 is screen;
+int tuning = EEPROM.read(0);
+
+
+// ---------------//
+// Main functions //
+// ---------------//
 
 void setup() {
   SPI.begin();
   setupMidi();
   setupControls();
   setupDisplay();
-  Serial.begin(9600);
+  //Serial.begin(9600);
 }
 
 void loop() {
   if (usbMIDI.read()) {
-    processMIDI();
+    //processMIDI();
   }
-  readEncoder();
+  onEncoderChange();
+  onButtonClick();
 }
 
 // ------------------//
 // Control functions //
 // ------------------//
-volatile int dir = 0;
+
 void setupControls() {
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonPin, INPUT);
+  attachInterrupt(4, onButtonClick, FALLING);
 }
 
-void readEncoder() {
+void onEncoderChange() {
   long newEncoderPosn;
   newEncoderPosn = encoder.read();
-  if (newEncoderPosn != encoderPosn) {
-    if (newEncoderPosn % 4 == 0) {
-      encoderCounter = newEncoderPosn/4;
-      Serial.println(encoderCounter);
-      activeTab = encoderCounter;
+  if (newEncoderPosn != encoderPosn && newEncoderPosn % 4 == 0) { // if the 4th data point from quadrature encoder
+    if (screenMode == 1) {
+      activeTab += newEncoderPosn/4;
+      activeTab = constrain(activeTab, 0, 2);
       renderTabs(activeTab);
     }
-    encoderPosn = newEncoderPosn;
+    if (activeTab == 1 && screenMode == -1) {
+      tuning += newEncoderPosn/4;
+      tuning = constrain(tuning, -10, 10);
+      renderTuning(tuning, BLACK);
+      EEPROM.write(0, tuning);
+    }
+    encoder.write(0);
   }
-
 }
 
 void onButtonClick() {
-  //cli();
-  buttonState = digitalRead(buttonPin);
-  Serial.print("Click");
-  //Serial.println(buttonState);
-  //sei();
-
+ if (pushbutton.update()) {
+    if (pushbutton.fallingEdge() && activeTab != 0) {
+      screenMode = -screenMode;
+      Serial.println(screenMode);
+    }
+    if (activeTab == 1) {
+      if (screenMode == -1) {
+        renderTuning(tuning, BLACK);
+      } else {
+        renderTuning(tuning, WHITE);
+      }
+    }
+  }
 }
 
 
@@ -107,7 +129,12 @@ void OnNoteOn (byte channel, byte pitch, byte velocity) {
       writeDAC(cs_pin, 1, velocity << 5);
       digitalWriteFast(gate_pin, HIGH);
       String note = numberToString(pitch);
-      printToLCD(("NoteOn: " + note), 0, 32, 1, WHITE);
+      if (activeTab == 0) {
+        printToLCD("Vel:", 0, 18, 1, WHITE);
+        printToLCD(velocity, 24, 18, 1, WHITE);
+        printToLCD(note, 56, 18, 4, WHITE);
+      }
+      
     }
 
     else {
@@ -138,9 +165,9 @@ void writeDAC (int cs, int dac, int val) {
   //val = val & 8191;
   if (dac == 0) {
         
-    Serial.print("DACval: ");
-    Serial.println(val);
-    Serial.println(val & 255);
+//    Serial.print("DACval: ");
+//    Serial.println(val);
+//    Serial.println(val & 255);
 
   }
 
@@ -149,65 +176,54 @@ void writeDAC (int cs, int dac, int val) {
   digitalWrite(cs, HIGH);
 }
 
-void processMIDI(void) {
-  byte type, channel, data1, data2;
-
-  // fetch the MIDI message, defined by these 5 numbers (except SysEX)
-  //
-  type = usbMIDI.getType();       // which MIDI message, 128-255
-  channel = usbMIDI.getChannel(); // which MIDI channel, 1-16
-  data1 = usbMIDI.getData1();     // first data byte of message, 0-127
-  data2 = usbMIDI.getData2();     // second data byte of message, 0-127
-  
-  switch (type) {
-    case usbMIDI.NoteOff: // 0x80
-      Serial.print("Note Off, ch=");
-      Serial.print(channel, DEC);
-      Serial.print(", note=");
-      Serial.print(data1, DEC);
-      Serial.print(", velocity=");
-      Serial.println(data2, DEC);
-      break;
-
-    case usbMIDI.NoteOn: // 0x90
-      printToLCD(data2, 60, 20, 1, WHITE);
-      //int bytes = 112131;
-      Serial.print("Note On, ch=");
-      Serial.print(channel, DEC);
-      Serial.print(", note=");
-      Serial.print(data1, DEC);
-      Serial.print(", velocity=");
-      Serial.println(data2, DEC);
-      break;
-  }
-
-}
+//void processMIDI(void) {
+//  byte type, channel, data1, data2;
+//
+//  // fetch the MIDI message, defined by these 5 numbers (except SysEX)
+//  //
+//  type = usbMIDI.getType();       // which MIDI message, 128-255
+//  channel = usbMIDI.getChannel(); // which MIDI channel, 1-16
+//  data1 = usbMIDI.getData1();     // first data byte of message, 0-127
+//  data2 = usbMIDI.getData2();     // second data byte of message, 0-127
+//  
+//  switch (type) {
+//    case usbMIDI.NoteOff: // 0x80
+//      Serial.print("Note Off, ch=");
+//      Serial.print(channel, DEC);
+//      Serial.print(", note=");
+//      Serial.print(data1, DEC);
+//      Serial.print(", velocity=");
+//      Serial.println(data2, DEC);
+//      break;
+//
+//    case usbMIDI.NoteOn: // 0x90
+//      
+//      //int bytes = 112131;
+//      Serial.print("Note On, ch=");
+//      Serial.print(channel, DEC);
+//      Serial.print(", note=");
+//      Serial.print(data1, DEC);
+//      Serial.print(", velocity=");
+//      Serial.println(data2, DEC);
+//      break;
+//  }
+//
+//}
 
 // --------------//
 // LCD functions //
 // --------------//
 
 void setupDisplay()   {                
-  // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
-  // init done
   display.clearDisplay();
-   // display.fillCircle(display.width()/2, display.height()/2, 10, WHITE);
-  display.drawLine(0, 11, display.width()-1, 11, WHITE);
-  printToLCD("MIDI to CV v1.0", 0, 0, 1, WHITE);
-  printToLCD("Velocity: ", 0, 20, 1, WHITE);
-  //display.invertDisplay(true);
-
-  //display.fillRect(curX, curY, 100, 10, BLACK);
-
-
   renderTabs(activeTab);
-  
   display.display();
 }
 
-void renderTabs(int activeTab) {
-  String tabs[3] = { "MAIN", "2", "3" };
+void renderTabs(int encoderVal) {
+
+  String tabs[3] = { "MAIN", "TUNE", "2" };
   for (int i = 0; i < 3; i++) {
     display.fillRect(1 + i * 42, 52, 41, 11, BLACK);
     if (i == activeTab) {
@@ -218,6 +234,50 @@ void renderTabs(int activeTab) {
       printToLCD(tabs[i], 3 + i * 43, 55, 1, WHITE);
     }
   }
+  renderScreen(activeTab);
+  encoder.write(activeTab * 4);
+}
+
+void renderScreen(int screen) {
+  display.fillRect(0, 0, 128, 52, BLACK); // clear screen area
+
+  switch(screen) {
+
+    case 0  :
+      display.drawLine(0, 11, display.width()-1, 11, WHITE);
+      printToLCD("MIDI to CV v1.0", 0, 0, 1, WHITE);
+      //printToLCD("Velo: ", 0, 20, 1, WHITE);;
+      break;
+  
+    case 1  :
+      //display.
+      printToLCD("Tuning", 40, 0, 1, WHITE);
+      renderTuning(tuning, WHITE);
+     
+
+      break;
+
+    case 2  :
+      printToLCD(screen, 0, 0, 2, WHITE);;
+      break;
+
+  }
+
+}
+
+void renderTuning(int value, char color) {
+  int pixelScale = 5;
+  display.fillRect(40, 30, 60, 20, BLACK);
+  display.fillRect(0, 12, 128, 12, BLACK);
+  if (tuning > 0)
+    display.fillRect(64, 12, tuning * pixelScale, 12, WHITE);
+  else {
+    display.fillRect(64 + (tuning * pixelScale), 12, -(tuning * pixelScale), 12, WHITE);
+  }
+  display.drawRect(0, 12, 128, 12, WHITE);
+  printToLCD(value, 40, 30, 2, color);
+
+  display.display();
 }
 
 String numberToString (byte pitch) {
@@ -234,7 +294,7 @@ void printToLCD (String value, int curX, int curY, int size, char color) {
     bgColor = WHITE;
   }
   int strLength = value.length();
-  display.fillRect(curX, curY, strLength * 6, 8, bgColor);
+  display.fillRect(curX, curY, strLength * 6 * size, 8 * size, bgColor);
   display.setTextSize(size);
   display.setTextColor(color);
   display.setCursor(curX, curY);
