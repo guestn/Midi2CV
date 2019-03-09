@@ -53,7 +53,7 @@ void loop() {
   }
   onEncoderChange();
   onButtonClick();
-}
+} 
 
 // ------------------//
 // Control functions //
@@ -133,23 +133,24 @@ void OnNoteOn (byte channel, byte pitch, byte velocity) {
 
       previous_pitch = pitch;
       pitch_value = map(previous_pitch + pitch_change_value, 0.0, maximum_pitch_value, 0.0, number_of_steps);
-      //pitch_value = pitch_value - 60;
-        Serial.print("pitchVal: ");
-        Serial.println(pitch);
+      Serial.print("pitchVal: ");
+      Serial.println(pitch);
       writeDAC(cs_pin, 0, pitch_value);
       writeDAC(cs_pin, 1, velocity << 5);
       digitalWriteFast(gate_pin, HIGH);
       String note = numberToString(pitch);
       if (activeTab == 0) {
         printToLCD("Vel:", 0, 18, 1, WHITE);
-        printToLCD(velocity, 24, 18, 1, WHITE);
+        renderVelocity(velocity);
         printToLCD(note, 56, 18, 4, WHITE);
       }
+      renderGateIcon(true);
       
     }
 
     else {
       digitalWriteFast(gate_pin, LOW);
+      renderGateIcon(false);
     }
   }
 }
@@ -157,6 +158,7 @@ void OnNoteOn (byte channel, byte pitch, byte velocity) {
 void OnNoteOff (byte channel, byte pitch, byte velocity) {
   if (channel == 1) {
     digitalWriteFast(gate_pin, LOW);
+    renderGateIcon(false);
   }
 }
 
@@ -170,7 +172,7 @@ void OnPitchChange (byte channel, int pitch_change) {
 
 void writeDAC (int cs, int dac, int val) {
   digitalWrite(cs, LOW);
-  val = val* 1.1;
+  val = val * (tuning * 0.01 + 1);
   dac = dac & 1;
   val = val & 4095;
   //val = val & 8191;
@@ -237,14 +239,19 @@ void renderScreen(int screen) {
 
 }
 
+void renderVelocity(int value) {
+  display.fillRect(24, 17, 32, 13, BLACK);
+  printToLCD(value, 24, 18, 1, WHITE);
+}
+
 void renderTuning(int value, char color) {
   int pixelScale = 5;
-  display.fillRect(40, 30, 60, 20, BLACK);
+  display.fillRect(40, 29, 60, 20, BLACK);
   display.fillRect(0, 12, 128, 12, BLACK);
   if (tuning >= 0)
-    display.fillRect(64, 12, (tuning * pixelScale) + 1, 12, WHITE);
+    display.fillRect(63, 12, (tuning * pixelScale) + 1, 12, WHITE);
   else {
-    display.fillRect(64 + (tuning * pixelScale), 12, -(tuning * pixelScale), 12, WHITE);
+    display.fillRect(63 + (tuning * pixelScale), 12, -(tuning * pixelScale), 12, WHITE);
   }
   display.drawRect(0, 12, 128, 12, WHITE);
   printToLCD(value, 40, 30, 2, color);
@@ -253,8 +260,14 @@ void renderTuning(int value, char color) {
 }
 
 void renderOctave(int value, char color) {
-   display.fillRect(45, 16, 60, 36, BLACK);
+   display.fillRect(45, 15, 60, 36, BLACK);
    printToLCD(value, 45, 16, 4, color);
+}
+
+void renderGateIcon(bool value) {
+  display.fillRect(120, 1, 10, 10, BLACK);
+  if (value == true)
+    printToLCD("o", 120, 1, 1, WHITE);
 }
 
 String numberToString (byte pitch) {
@@ -271,7 +284,7 @@ void printToLCD (String value, int curX, int curY, int size, char color) {
     bgColor = WHITE;
   }
   int strLength = value.length();
-  display.fillRect(curX, curY, strLength * 6 * size, 8 * size, bgColor);
+  display.fillRect(curX -1, curY -1, strLength * 6 * size + 1, 8 * size + 1, bgColor);
   display.setTextSize(size);
   display.setTextColor(color);
   display.setCursor(curX, curY);
